@@ -1,5 +1,6 @@
 package com.example.catmeme;
 
+
 import javafx.animation.AnimationTimer;
 import javafx.animation.KeyFrame;
 import javafx.animation.Timeline;
@@ -39,6 +40,8 @@ public class IsometricGame2 extends Application {
     private double cameraY = MAP_SIZE * TILE_HEIGHT / 4;
     private Point2D playerPos = new Point2D(MAP_SIZE / 2, MAP_SIZE / 2);
     private Point2D targetPos = null;
+    private Point2D clickedPos = null; // Position où on a cliqué
+    private Point2D mouseHoverPos = null; // Position du curseur souris
     private List<Point2D> path = new ArrayList<>();
     private int currentPathIndex = 0;
     private boolean isMoving = false;
@@ -185,118 +188,230 @@ public class IsometricGame2 extends Application {
     private void initializeMaps() {
         System.out.println("Chargement de la carte...");
 
-        parseJson(                SimpleMapGenerator.generateSimpleMap("ma_carte_simple.json").toString());
-//
-//        if (!loadMapFromJson()) {
-//            System.out.println("village_map.json non trouvé, génération d'une carte par défaut");
-//            generateDefaultMap();
-//        }
+        if (!loadMapFromJson()) {
+            System.out.println("village_map.json non trouvé, génération d'une carte par défaut");
+            generateDefaultMap();
+        }
 
         System.out.println("Carte initialisée!");
     }
 
     private boolean loadMapFromJson() {
         try {
+            System.out.println("Tentative de chargement de village_map.json...");
             InputStream stream = getClass().getResourceAsStream("/village_map.json");
-            if (stream == null) return false;
+            if (stream == null) {
+                System.out.println("❌ Fichier /village_map.json non trouvé dans les resources");
+                return false;
+            }
 
             StringBuilder json = new StringBuilder();
             BufferedReader reader = new BufferedReader(new InputStreamReader(stream));
             String line;
             while ((line = reader.readLine()) != null) {
-                json.append(line);
+                json.append(line).append("\n");
             }
             reader.close();
 
-            return parseJson(json.toString());
+            String jsonContent = json.toString();
+            System.out.println("✅ Fichier JSON lu, taille: " + jsonContent.length() + " caractères");
+
+            // Vérifier la structure de base
+            if (!jsonContent.contains("\"floorMap\"") || !jsonContent.contains("\"wallMap\"")) {
+                System.out.println("❌ Structure JSON invalide - floorMap ou wallMap manquant");
+                return false;
+            }
+
+            return parseJson(jsonContent);
 
         } catch (Exception e) {
-            System.err.println("Erreur chargement JSON: " + e.getMessage());
+            System.err.println("❌ Erreur chargement JSON: " + e.getMessage());
+            e.printStackTrace();
             return false;
         }
     }
 
     private boolean parseJson(String json) {
         try {
-            // Parser simple pour extraire les données
-            String floorData = extractArray(json, "floorMap");
-            String wallData = extractArray(json, "wallMap");
-            String ceilingData = extractArray(json, "ceilingMap");
-            String wallTypeData = extractArray(json, "wallTypes");
+            System.out.println("🔍 Début du parsing JSON...");
 
-            if (floorData != null) parseIntArray(floorData, floorMap);
-            if (wallData != null) parseIntArray(wallData, wallMap);
-            if (ceilingData != null) parseIntArray(ceilingData, ceilingMap);
-            if (wallTypeData != null) parseWallTypeArray(wallTypeData);
+            // Parser chaque section avec debug
+            boolean floorSuccess = parseFloorMap(json);
+            boolean wallSuccess = parseWallMap(json);
+            boolean wallTypeSuccess = parseWallTypes(json);
 
-            // Initialiser les items
-            initializeItems();
+            // Initialiser les items (vides pour simplicité)
+            initializeEmptyItems();
 
-            System.out.println("Carte JSON chargée avec succès");
+            System.out.println("📊 Résultats du parsing:");
+            System.out.println("  - FloorMap: " + (floorSuccess ? "✅" : "❌"));
+            System.out.println("  - WallMap: " + (wallSuccess ? "✅" : "❌"));
+            System.out.println("  - WallTypes: " + (wallTypeSuccess ? "✅" : "❌"));
+
+            if (floorSuccess && wallSuccess) {
+                System.out.println("✅ Carte JSON chargée avec succès!");
+                printLoadedMapStats();
+                return true;
+            }
+
+        } catch (Exception e) {
+            System.err.println("❌ Erreur parsing JSON: " + e.getMessage());
+            e.printStackTrace();
+        }
+
+        return false;
+    }
+
+    private boolean parseFloorMap(String json) {
+        try {
+            String floorData = extractJsonArray(json, "floorMap");
+            if (floorData == null) {
+                System.out.println("❌ FloorMap non trouvé dans le JSON");
+                return false;
+            }
+
+            System.out.println("🔍 Parsing FloorMap, taille données: " + floorData.length());
+            parseIntArrayData(floorData, floorMap);
+
+            // Vérification
+            int nonZeroCount = 0;
+            for (int x = 0; x < MAP_SIZE; x++) {
+                for (int y = 0; y < MAP_SIZE; y++) {
+                    if (floorMap[x][y] > 0) nonZeroCount++;
+                }
+            }
+            System.out.println("✅ FloorMap chargé - " + nonZeroCount + " cases non-nulles");
             return true;
 
         } catch (Exception e) {
-            System.err.println("Erreur parsing JSON: " + e.getMessage());
+            System.err.println("❌ Erreur parsing FloorMap: " + e.getMessage());
             return false;
         }
     }
 
-    private String extractArray(String json, String arrayName) {
-        String marker = "\"" + arrayName + "\":[";
-        int start = json.indexOf(marker);
-        if (start == -1) return null;
+    private boolean parseWallMap(String json) {
+        try {
+            String wallData = extractJsonArray(json, "wallMap");
+            if (wallData == null) {
+                System.out.println("❌ WallMap non trouvé dans le JSON");
+                return false;
+            }
 
-        start += marker.length() - 1;
+            System.out.println("🔍 Parsing WallMap, taille données: " + wallData.length());
+            parseIntArrayData(wallData, wallMap);
+
+            // Vérification
+            int wallCount = 0;
+            for (int x = 0; x < MAP_SIZE; x++) {
+                for (int y = 0; y < MAP_SIZE; y++) {
+                    if (wallMap[x][y] != -1) wallCount++;
+                }
+            }
+            System.out.println("✅ WallMap chargé - " + wallCount + " murs trouvés");
+            return true;
+
+        } catch (Exception e) {
+            System.err.println("❌ Erreur parsing WallMap: " + e.getMessage());
+            return false;
+        }
+    }
+
+    private boolean parseWallTypes(String json) {
+        try {
+            String wallTypeData = extractJsonArray(json, "wallTypes");
+            if (wallTypeData == null) {
+                System.out.println("❌ WallTypes non trouvé dans le JSON");
+                return false;
+            }
+
+            System.out.println("🔍 Parsing WallTypes...");
+            parseWallTypeArrayData(wallTypeData);
+            System.out.println("✅ WallTypes chargé");
+            return true;
+
+        } catch (Exception e) {
+            System.err.println("❌ Erreur parsing WallTypes: " + e.getMessage());
+            return false;
+        }
+    }
+
+    private String extractJsonArray(String json, String arrayName) {
+        String startMarker = "\"" + arrayName + "\":[";
+        int startIndex = json.indexOf(startMarker);
+
+        if (startIndex == -1) {
+            System.out.println("❌ Marqueur de début non trouvé pour: " + arrayName);
+            return null;
+        }
+
+        startIndex += startMarker.length() - 1; // Position sur '['
+
         int brackets = 0;
-        int end = start;
+        int endIndex = startIndex;
 
-        for (int i = start; i < json.length(); i++) {
+        for (int i = startIndex; i < json.length(); i++) {
             char c = json.charAt(i);
-            if (c == '[') brackets++;
-            else if (c == ']') {
+            if (c == '[') {
+                brackets++;
+            } else if (c == ']') {
                 brackets--;
                 if (brackets == 0) {
-                    end = i + 1;
+                    endIndex = i + 1;
                     break;
                 }
             }
         }
 
-        return json.substring(start, end);
+        if (brackets != 0) {
+            System.out.println("❌ Crochets non équilibrés pour: " + arrayName);
+            return null;
+        }
+
+        String result = json.substring(startIndex, endIndex);
+        System.out.println("🔍 Array " + arrayName + " extrait, longueur: " + result.length());
+        return result;
     }
 
-    private void parseIntArray(String arrayData, int[][] target) {
-        // Enlever les crochets extérieurs
-        arrayData = arrayData.substring(1, arrayData.length() - 1);
+    private void parseIntArrayData(String arrayData, int[][] target) {
+        // Nettoyer les données
+        arrayData = arrayData.trim();
+        if (arrayData.startsWith("[")) arrayData = arrayData.substring(1);
+        if (arrayData.endsWith("]")) arrayData = arrayData.substring(0, arrayData.length() - 1);
 
-        // Séparer les lignes
-        String[] rows = arrayData.split("\\],\\s*\\[");
+        // Diviser en lignes
+        String[] lines = arrayData.split("\\],\\s*\\[");
+        System.out.println("🔍 Nombre de lignes trouvées: " + lines.length);
 
-        for (int x = 0; x < Math.min(rows.length, MAP_SIZE); x++) {
-            String row = rows[x].replaceAll("[\\[\\]]", "");
-            String[] values = row.split(",");
+        for (int x = 0; x < Math.min(lines.length, MAP_SIZE); x++) {
+            String line = lines[x].replaceAll("[\\[\\]\\s]", "");
+            String[] values = line.split(",");
 
             for (int y = 0; y < Math.min(values.length, MAP_SIZE); y++) {
                 try {
                     target[x][y] = Integer.parseInt(values[y].trim());
                 } catch (NumberFormatException e) {
                     target[x][y] = -1;
+                    System.out.println("⚠️ Erreur parsing valeur à [" + x + "][" + y + "]: " + values[y]);
                 }
             }
         }
     }
 
-    private void parseWallTypeArray(String arrayData) {
-        arrayData = arrayData.substring(1, arrayData.length() - 1);
-        String[] rows = arrayData.split("\\],\\s*\\[");
+    private void parseWallTypeArrayData(String arrayData) {
+        arrayData = arrayData.trim();
+        if (arrayData.startsWith("[")) arrayData = arrayData.substring(1);
+        if (arrayData.endsWith("]")) arrayData = arrayData.substring(0, arrayData.length() - 1);
 
-        for (int x = 0; x < Math.min(rows.length, MAP_SIZE); x++) {
-            String row = rows[x].replaceAll("[\\[\\]\"]", "");
-            String[] values = row.split(",\\s*");
+        String[] lines = arrayData.split("\\],\\s*\\[");
+
+        for (int x = 0; x < Math.min(lines.length, MAP_SIZE); x++) {
+            String line = lines[x].replaceAll("[\\[\\]\\s]", "");
+            String[] values = line.split(",");
 
             for (int y = 0; y < Math.min(values.length, MAP_SIZE); y++) {
                 try {
-                    wallTypes[x][y] = WallType.valueOf(values[y].trim());
+                    String wallTypeName = values[y].trim().replace("\"", "");
+                    wallTypes[x][y] = WallType.valueOf(wallTypeName);
                 } catch (Exception e) {
                     wallTypes[x][y] = WallType.NONE;
                 }
@@ -304,17 +419,36 @@ public class IsometricGame2 extends Application {
         }
     }
 
-    private void initializeItems() {
-        Random rand = new Random();
+    private void initializeEmptyItems() {
         for (int x = 0; x < MAP_SIZE; x++) {
             for (int y = 0; y < MAP_SIZE; y++) {
                 itemMap[x][y] = new ArrayList<>();
-                if (rand.nextDouble() < 0.03) {
-                    String[] types = {"coin", "potion", "key", "herb", "gem"};
-                    itemMap[x][y].add(new Item(types[rand.nextInt(types.length)], 1 + rand.nextInt(3)));
-                }
             }
         }
+    }
+
+    private void printLoadedMapStats() {
+        int wallCount = 0;
+        Map<Integer, Integer> floorStats = new HashMap<>();
+
+        for (int x = 0; x < MAP_SIZE; x++) {
+            for (int y = 0; y < MAP_SIZE; y++) {
+                // Compter les murs
+                if (wallMap[x][y] != -1) wallCount++;
+
+                // Compter les types de sol
+                int floorType = floorMap[x][y];
+                floorStats.put(floorType, floorStats.getOrDefault(floorType, 0) + 1);
+            }
+        }
+
+        System.out.println("📊 Statistiques de la carte chargée:");
+        System.out.println("  - Nombre de murs: " + wallCount);
+        System.out.println("  - Types de sol les plus fréquents:");
+        floorStats.entrySet().stream()
+                .sorted((a, b) -> b.getValue().compareTo(a.getValue()))
+                .limit(5)
+                .forEach(entry -> System.out.println("    Type " + entry.getKey() + ": " + entry.getValue() + " cases"));
     }
 
     private void generateDefaultMap() {
@@ -357,11 +491,15 @@ public class IsometricGame2 extends Application {
         double centerX = CANVAS_WIDTH / 2;
         double centerY = CANVAS_HEIGHT / 2;
         playerAngle = Math.atan2(mouseY - centerY, mouseX - centerX);
+
+        // Calculer la position de la tuile sous le curseur
+        mouseHoverPos = screenToTile(mouseX, mouseY);
     }
 
     private void onMouseClicked(MouseEvent e) {
         Point2D clickedTile = screenToTile(e.getX(), e.getY());
         if (clickedTile != null && isValidTile((int)clickedTile.getX(), (int)clickedTile.getY())) {
+            clickedPos = clickedTile; // Sauvegarder la position cliquée
             moveToPosition(clickedTile);
         }
     }
@@ -400,6 +538,7 @@ public class IsometricGame2 extends Application {
 
         if (path.isEmpty()) {
             showExclamationMark();
+            // Garder la position cliquée même si inaccessible
             return;
         }
 
@@ -428,6 +567,7 @@ public class IsometricGame2 extends Application {
             if (currentPathIndex >= path.size()) {
                 isMoving = false;
                 playerPos = targetPos;
+                clickedPos = null; // Effacer l'indicateur bleu une fois arrivé
                 moveTimeline.stop();
                 return;
             }
@@ -527,6 +667,7 @@ public class IsometricGame2 extends Application {
         }
 
         renderPlayer();
+        renderMouseIndicators();
     }
 
     private void renderTile(int x, int y) {
@@ -647,6 +788,49 @@ public class IsometricGame2 extends Application {
             gc.setFill(Color.RED);
             gc.fillText("!", screenX - 3, screenY - 18);
         }
+    }
+
+    private void renderMouseIndicators() {
+        // Losange bleu sur la position cliquée
+        if (clickedPos != null && isValidTile((int)clickedPos.getX(), (int)clickedPos.getY())) {
+            renderTileIndicator(clickedPos, Color.BLUE, 0.6);
+        }
+
+        // Losange vert/rouge sur la position du curseur
+        if (mouseHoverPos != null && isValidTile((int)mouseHoverPos.getX(), (int)mouseHoverPos.getY())) {
+            boolean canWalk = canWalkThrough((int)mouseHoverPos.getX(), (int)mouseHoverPos.getY());
+            Color indicatorColor = canWalk ? Color.LIME : Color.RED;
+            renderTileIndicator(mouseHoverPos, indicatorColor, 0.4);
+        }
+    }
+
+    private void renderTileIndicator(Point2D tilePos, Color color, double opacity) {
+        Point2D screenPos = tileToScreen(tilePos.getX(), tilePos.getY());
+        double screenX = screenPos.getX();
+        double screenY = screenPos.getY();
+
+        // Forme losange isométrique
+        double[] xPoints = {
+                screenX, // Haut
+                screenX + TILE_WIDTH/2, // Droite
+                screenX, // Bas
+                screenX - TILE_WIDTH/2 // Gauche
+        };
+        double[] yPoints = {
+                screenY - TILE_HEIGHT/2, // Haut
+                screenY, // Droite
+                screenY + TILE_HEIGHT/2, // Bas
+                screenY // Gauche
+        };
+
+        // Dessiner le losange avec transparence
+        gc.setFill(color.deriveColor(0, 1, 1, opacity));
+        gc.fillPolygon(xPoints, yPoints, 4);
+
+        // Contour plus visible
+        gc.setStroke(color.deriveColor(0, 1, 0.7, 0.8));
+        gc.setLineWidth(2);
+        gc.strokePolygon(xPoints, yPoints, 4);
     }
 
     // Classe Node pour A*
