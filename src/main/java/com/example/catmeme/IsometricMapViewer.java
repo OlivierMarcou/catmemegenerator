@@ -123,7 +123,7 @@ public class IsometricMapViewer extends Application {
 
         // Chargement de toutes les images disponibles
         for (int i = 1; i <= 100; i++) {
-            String resourcePath = "/" + i + ".jpg";
+            String resourcePath = "/resources/" + i + ".jpg";
 
             try {
                 var imageStream = getClass().getResourceAsStream(resourcePath);
@@ -271,7 +271,7 @@ public class IsometricMapViewer extends Application {
         openSet.add(startNode);
         allNodes.put(start.x + "," + start.y, startNode);
 
-        // Directions de mouvement (8 directions)
+        // Directions de mouvement (8 directions mais privilégier les orthogonales)
         int[][] directions = {{0,1}, {1,0}, {0,-1}, {-1,0}, {1,1}, {1,-1}, {-1,1}, {-1,-1}};
 
         while (!openSet.isEmpty()) {
@@ -286,7 +286,9 @@ public class IsometricMapViewer extends Application {
 
             // Destination atteinte
             if (current.x == goal.x && current.y == goal.y) {
-                return reconstructPath(current);
+                List<Point> path = reconstructPath(current);
+                System.out.println("Chemin A* calculé: " + path.size() + " étapes");
+                return path;
             }
 
             // Exploration des voisins
@@ -302,7 +304,8 @@ public class IsometricMapViewer extends Application {
                     continue;
                 }
 
-                double moveCost = (Math.abs(dir[0]) + Math.abs(dir[1]) == 2) ? 1.414 : 1.0; // Diagonale vs orthogonal
+                // Coût plus élevé pour les diagonales
+                double moveCost = (Math.abs(dir[0]) + Math.abs(dir[1]) == 2) ? 1.414 : 1.0;
                 double tentativeGCost = current.gCost + moveCost;
 
                 AStarNode neighbor = allNodes.get(neighborKey);
@@ -326,6 +329,7 @@ public class IsometricMapViewer extends Application {
             }
         }
 
+        System.out.println("Aucun chemin A* trouvé vers la destination");
         return null; // Aucun chemin trouvé
     }
 
@@ -376,7 +380,7 @@ public class IsometricMapViewer extends Application {
             public void handle(long now) {
                 if (now - lastUpdate >= FRAME_TIME) {
                     processInput();
-                    updateCamera();
+                    updateCamera(); // Mise à jour de la caméra à chaque frame
                     render(gc);
                     lastUpdate = now;
                 }
@@ -461,11 +465,12 @@ public class IsometricMapViewer extends Application {
     }
 
     private void updateCamera() {
-        // La caméra suit le joueur en convertissant sa position en coordonnées isométriques
+        // La caméra suit le joueur - le joueur doit apparaître au centre de l'écran
+        // On calcule l'offset nécessaire pour centrer le joueur
         double playerIsoX = (playerX - playerY) * (TILE_WIDTH / 2.0);
         double playerIsoY = (playerX + playerY) * (TILE_HEIGHT / 2.0);
 
-        // L'offset de caméra centre la vue sur le joueur
+        // L'offset repositionne la carte pour que le joueur soit au centre
         cameraOffsetX = CANVAS_WIDTH / 2.0 - playerIsoX;
         cameraOffsetY = CANVAS_HEIGHT / 2.0 - playerIsoY;
     }
@@ -601,7 +606,7 @@ public class IsometricMapViewer extends Application {
 
     private void renderPlayer(GraphicsContext gc) {
         double playerScreenX = cameraOffsetX;
-        double playerScreenY = cameraOffsetY;
+        double playerScreenY = cameraOffsetY+400;
 
         // Point d'exclamation si le chemin est bloqué
         if (pathBlocked && System.currentTimeMillis() - pathBlockedTime < 3000) {
