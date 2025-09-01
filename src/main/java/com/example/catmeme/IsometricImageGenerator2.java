@@ -121,8 +121,18 @@ public class IsometricImageGenerator2 extends Application {
 
         for (int i = 0; i < 50; i++) {
             String type = wallTypes[i % wallTypes.length];
+
+            // Générer l'image normale du mur
             WritableImage image = createWallTile(type, i);
             saveImage(image, "src/main/resources/murs/wall_" + i + ".png");
+
+            // Si c'est une porte (indices 25-29 selon le générateur de carte),
+            // générer aussi la version ouverte
+            if (i >= 25 && i <= 29) {
+                WritableImage openImage = createOpenDoorTile(type, i);
+                saveImage(openImage, "src/main/resources/murs/wall_" + i + "_o.png");
+                System.out.println("  ✅ Porte ouverte générée : wall_" + i + "_o.png");
+            }
         }
     }
 
@@ -167,6 +177,116 @@ public class IsometricImageGenerator2 extends Application {
         gc.strokePolygon(xPoints, yPoints, 4);
 
         return canvas.snapshot(null, null);
+    }
+
+    private WritableImage createOpenDoorTile(String type, int variant) {
+        Canvas canvas = new Canvas(TILE_WIDTH, WALL_HEIGHT);
+        GraphicsContext gc = canvas.getGraphicsContext2D();
+
+        // Fond transparent
+        gc.clearRect(0, 0, TILE_WIDTH, WALL_HEIGHT);
+
+        Color baseColor = getUniqueColor(type, variant);
+        Color lightColor = baseColor.brighter();
+        Color darkColor = baseColor.darker();
+
+        double wallBottom = WALL_HEIGHT - TILE_HEIGHT/2;
+
+        // Pour une porte ouverte, on dessine seulement les montants de porte
+        // et l'ouverture au milieu
+
+        // Montant gauche de la porte
+        gc.setFill(createVerticalGradient(lightColor, baseColor));
+        gc.fillRect(TILE_WIDTH/4, wallBottom - WALL_HEIGHT + TILE_HEIGHT, TILE_WIDTH/8, WALL_HEIGHT - TILE_HEIGHT);
+
+        // Montant droit de la porte
+        gc.fillRect(TILE_WIDTH*5/8, wallBottom - WALL_HEIGHT + TILE_HEIGHT, TILE_WIDTH/8, WALL_HEIGHT - TILE_HEIGHT);
+
+        // Linteau (partie haute) - plus fin que dans la version fermée
+        gc.fillRect(TILE_WIDTH/4, wallBottom - WALL_HEIGHT + TILE_HEIGHT, TILE_WIDTH/2, TILE_HEIGHT/4);
+
+        // Face droite des montants (parallélogrammes)
+        double[] rightX1 = {TILE_WIDTH*3/8.0, TILE_WIDTH*7/16.0, TILE_WIDTH*7/16.0, TILE_WIDTH*3/8.0};
+        double[] rightY1 = {wallBottom - WALL_HEIGHT + TILE_HEIGHT, wallBottom - WALL_HEIGHT + TILE_HEIGHT/2, wallBottom - TILE_HEIGHT/2, wallBottom};
+        gc.setFill(createVerticalGradient(baseColor, darkColor));
+        gc.fillPolygon(rightX1, rightY1, 4);
+
+        double[] rightX2 = {TILE_WIDTH*11/16.0, TILE_WIDTH*3/4.0, TILE_WIDTH*3/4.0, TILE_WIDTH*11/16.0};
+        double[] rightY2 = {wallBottom - WALL_HEIGHT + TILE_HEIGHT, wallBottom - WALL_HEIGHT + TILE_HEIGHT/2, wallBottom - TILE_HEIGHT/2, wallBottom};
+        gc.fillPolygon(rightX2, rightY2, 4);
+
+        // Top des montants (petits losanges)
+        double[] topX1 = {TILE_WIDTH*5/16.0, TILE_WIDTH*7/16.0, TILE_WIDTH*5/16.0, TILE_WIDTH*3/16.0};
+        double[] topY1 = {wallBottom - WALL_HEIGHT + TILE_HEIGHT/2, wallBottom - WALL_HEIGHT + TILE_HEIGHT, wallBottom - WALL_HEIGHT + TILE_HEIGHT*3/2, wallBottom - WALL_HEIGHT + TILE_HEIGHT};
+        gc.setFill(lightColor.brighter());
+        gc.fillPolygon(topX1, topY1, 4);
+
+        double[] topX2 = {TILE_WIDTH*11/16.0, TILE_WIDTH*13/16.0, TILE_WIDTH*11/16.0, TILE_WIDTH*9/16.0};
+        double[] topY2 = {wallBottom - WALL_HEIGHT + TILE_HEIGHT/2, wallBottom - WALL_HEIGHT + TILE_HEIGHT, wallBottom - WALL_HEIGHT + TILE_HEIGHT*3/2, wallBottom - WALL_HEIGHT + TILE_HEIGHT};
+        gc.fillPolygon(topX2, topY2, 4);
+
+        // Ajouter des détails pour indiquer que c'est une porte ouverte
+        addOpenDoorDetails(gc, type, baseColor);
+
+        // Contours des montants
+        gc.setStroke(darkColor.darker());
+        gc.setLineWidth(1);
+        gc.strokeRect(TILE_WIDTH/4, wallBottom - WALL_HEIGHT + TILE_HEIGHT, TILE_WIDTH/8, WALL_HEIGHT - TILE_HEIGHT);
+        gc.strokeRect(TILE_WIDTH*5/8, wallBottom - WALL_HEIGHT + TILE_HEIGHT, TILE_WIDTH/8, WALL_HEIGHT - TILE_HEIGHT);
+        gc.strokePolygon(rightX1, rightY1, 4);
+        gc.strokePolygon(rightX2, rightY2, 4);
+        gc.strokePolygon(topX1, topY1, 4);
+        gc.strokePolygon(topX2, topY2, 4);
+
+        return canvas.snapshot(null, null);
+    }
+
+    private void addOpenDoorDetails(GraphicsContext gc, String type, Color baseColor) {
+        double wallBottom = WALL_HEIGHT - TILE_HEIGHT/2;
+
+        switch (type) {
+            case "wood":
+                // Grain du bois sur les montants
+                gc.setStroke(baseColor.darker());
+                gc.setLineWidth(0.5);
+                // Montant gauche
+                for (int i = 0; i < 3; i++) {
+                    double y = wallBottom - WALL_HEIGHT + TILE_HEIGHT + i * (WALL_HEIGHT - TILE_HEIGHT) / 4;
+                    gc.strokeLine(TILE_WIDTH/4 + 1, y, TILE_WIDTH*3/8 - 1, y);
+                }
+                // Montant droit
+                for (int i = 0; i < 3; i++) {
+                    double y = wallBottom - WALL_HEIGHT + TILE_HEIGHT + i * (WALL_HEIGHT - TILE_HEIGHT) / 4;
+                    gc.strokeLine(TILE_WIDTH*5/8 + 1, y, TILE_WIDTH*3/4 - 1, y);
+                }
+                break;
+
+            case "brick":
+                // Motif de briques sur les montants
+                gc.setStroke(baseColor.darker().darker());
+                gc.setLineWidth(0.5);
+                int brickHeight = 8;
+                for (int row = 0; row < (WALL_HEIGHT - TILE_HEIGHT) / brickHeight; row++) {
+                    double y = TILE_HEIGHT + row * brickHeight;
+                    // Montant gauche
+                    gc.strokeRect(TILE_WIDTH/4, y, TILE_WIDTH/8, brickHeight);
+                    // Montant droit
+                    gc.strokeRect(TILE_WIDTH*5/8, y, TILE_WIDTH/8, brickHeight);
+                }
+                break;
+
+            case "glass":
+                // Reflets sur les montants en verre
+                gc.setStroke(Color.WHITE.deriveColor(0, 1, 1, 0.7));
+                gc.setLineWidth(1);
+                gc.strokeLine(TILE_WIDTH/4 + 2, TILE_HEIGHT + 5, TILE_WIDTH/4 + 4, TILE_HEIGHT + 15);
+                gc.strokeLine(TILE_WIDTH*5/8 + 2, TILE_HEIGHT + 5, TILE_WIDTH*5/8 + 4, TILE_HEIGHT + 15);
+                break;
+        }
+
+        // Ajouter une ombre dans l'ouverture pour indiquer la profondeur
+        gc.setFill(Color.BLACK.deriveColor(0, 1, 1, 0.3));
+        gc.fillRect(TILE_WIDTH*3/8, wallBottom - WALL_HEIGHT + TILE_HEIGHT, TILE_WIDTH/4, WALL_HEIGHT - TILE_HEIGHT);
     }
 
     private WritableImage createWallTile(String type, int variant) {

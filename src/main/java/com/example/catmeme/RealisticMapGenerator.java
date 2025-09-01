@@ -1,9 +1,11 @@
 package com.example.catmeme;
 
-//import com.isometric.game.IsometricGame;
-import java.io.FileWriter;
-import java.io.IOException;
-import java.util.*;
+
+        import java.awt.*;
+        import java.io.FileWriter;
+        import java.io.IOException;
+        import java.util.*;
+        import java.util.List;
 
 /**
  * Générateur de cartes réalistes pour créer un environnement
@@ -73,9 +75,21 @@ public class RealisticMapGenerator {
         }
     }
 
-    static class Point {
-        int x, y;
-        Point(int x, int y) { this.x = x; this.y = y; }
+    // Structure pour représenter les propriétés des murs
+    static class WallProperties {
+        boolean isOpen = false;     // Porte ouverte/fermée
+        boolean isLocked = false;   // Porte verrouillée
+        String keyId = null;        // ID de clé unique
+        int health = 255;          // Vie des murs destructibles (0-255)
+
+        WallProperties() {}
+
+        WallProperties(boolean isOpen, boolean isLocked, String keyId, int health) {
+            this.isOpen = isOpen;
+            this.isLocked = isLocked;
+            this.keyId = keyId;
+            this.health = Math.max(0, Math.min(255, health));
+        }
     }
 
     // Structure pour représenter une zone de forêt
@@ -94,6 +108,7 @@ public class RealisticMapGenerator {
         public int[][] wallMap;
         public int[][] ceilingMap;
         public IsometricGame.WallType[][] wallTypes;
+        public WallProperties[][] wallProperties; // Nouvelles propriétés
         public List<IsometricGame.Item>[][] itemMap;
 
         @SuppressWarnings("unchecked")
@@ -102,13 +117,15 @@ public class RealisticMapGenerator {
             wallMap = new int[size][size];
             ceilingMap = new int[size][size];
             wallTypes = new IsometricGame.WallType[size][size];
+            wallProperties = new WallProperties[size][size]; // Initialiser les propriétés
             itemMap = new List[size][size];
 
-            // Initialiser les listes d'items
+            // Initialiser les listes d'items et propriétés des murs
             for (int x = 0; x < size; x++) {
                 for (int y = 0; y < size; y++) {
                     itemMap[x][y] = new ArrayList<>();
                     wallTypes[x][y] = IsometricGame.WallType.NONE;
+                    wallProperties[x][y] = new WallProperties(); // Propriétés par défaut
                     wallMap[x][y] = -1;
                     ceilingMap[x][y] = -1;
                 }
@@ -150,13 +167,16 @@ public class RealisticMapGenerator {
         // 7. Ajout des portes et fenêtres aux maisons
         addDoorsAndWindows(map, houses);
 
-        // 8. Génération des toits
+        // 8. Configuration des propriétés des murs (portes verrouillées, santé des murs)
+        configureWallProperties(map);
+
+        // 9. Génération des toits
         generateRoofs(map, houses, forests);
 
-        // 9. Génération des items
+        // 10. Génération des items (incluant les clés)
         generateItems(map);
 
-        // 10. Ajout de détails (lac, pont, etc.)
+        // 11. Ajout de détails (lac, pont, etc.)
         addEnvironmentalDetails(map);
 
         // 11. Sauvegarde en JSON
@@ -409,6 +429,16 @@ public class RealisticMapGenerator {
             Point doorPos = wallPositions.get(random.nextInt(wallPositions.size()));
             map.wallMap[doorPos.x][doorPos.y] = WallType.DOOR.getRandomIndex();
             map.wallTypes[doorPos.x][doorPos.y] = IsometricGame.WallType.DOOR;
+
+            // Configurer les propriétés de la porte
+            WallProperties props = map.wallProperties[doorPos.x][doorPos.y];
+            props.isOpen = false; // Porte fermée par défaut
+
+            // 30% de chance d'être verrouillée
+            if (random.nextDouble() < 0.3) {
+                props.isLocked = true;
+                props.keyId = "house_key_" + house.x + "_" + house.y; // ID basé sur la position de la maison
+            }
         }
     }
 
@@ -456,7 +486,63 @@ public class RealisticMapGenerator {
         }
     }
 
+    private static void configureWallProperties(GeneratedMap map) {
+        System.out.println("Configuration des propriétés des murs...");
+
+        int lockedDoors = 0;
+        int destructibleWalls = 0;
+
+        for (int x = 0; x < MAP_SIZE; x++) {
+            for (int y = 0; y < MAP_SIZE; y++) {
+                WallProperties props = map.wallProperties[x][y];
+                IsometricGame.WallType wallType = map.wallTypes[x][y];
+
+                if (wallType == IsometricGame.WallType.DOOR) {
+                    // Configuration des portes
+                    props.isOpen = false; // Toutes fermées par défaut
+
+                    // Portes de maison déjà configurées dans addDoor()
+                    // Ajouter quelques portes verrouillées aléatoires
+                    if (props.keyId == null && random.nextDouble() < 0.1) {
+                        props.isLocked = true;
+                        props.keyId = "random_key_" + (x * MAP_SIZE + y);
+                        lockedDoors++;
+                    }
+
+                } else if (wallType == IsometricGame.WallType.DESTRUCTIBLE) {
+                    // Configuration des murs destructibles
+                    props.health = 80 + random.nextInt(176); // Santé entre 80 et 255
+                    destructibleWalls++;
+
+                } else if (wallType == IsometricGame.WallType.TRANSPARENT) {
+                    // Les fenêtres peuvent être cassées
+                    if (random.nextDouble() < 0.2) {
+                        props.health = 30 + random.nextInt(50); // Fenêtres fragiles (30-80)
+                    }
+                }
+            }
+        }
+
+        System.out.println("✅ Propriétés configurées:");
+        System.out.println("  - Portes verrouillées: " + lockedDoors);
+        System.out.println("  - Murs destructibles: " + destructibleWalls);
+    }
     private static void generateItems(GeneratedMap map) {
+        System.out.println("Génération des items et des clés...");
+
+        Set<String> keysGenerated = new HashSet<>();
+        int totalKeys = 0;
+
+        // Collecter toutes les clés nécessaires
+        for (int x = 0; x < MAP_SIZE; x++) {
+            for (int y = 0; y < MAP_SIZE; y++) {
+                WallProperties props = map.wallProperties[x][y];
+                if (props.keyId != null) {
+                    keysGenerated.add(props.keyId);
+                }
+            }
+        }
+
         // Items dans les maisons
         for (int x = 0; x < MAP_SIZE; x++) {
             for (int y = 0; y < MAP_SIZE; y++) {
@@ -464,7 +550,16 @@ public class RealisticMapGenerator {
                         map.floorMap[x][y] < FloorType.WOOD_FLOOR.endIndex) {
 
                     if (random.nextDouble() < 0.15) { // 15% chance dans les maisons
-                        addRandomItems(map, x, y, true);
+                        // Chance d'avoir une clé dans les maisons
+                        if (!keysGenerated.isEmpty() && random.nextDouble() < 0.3) {
+                            String randomKey = keysGenerated.toArray(new String[0])[random.nextInt(keysGenerated.size())];
+                            map.itemMap[x][y].add(new IsometricGame.Item("key_" + randomKey, 1));
+                            keysGenerated.remove(randomKey); // Éviter les doublons
+                            totalKeys++;
+                        } else {
+                            // Items normaux
+                            addRandomItems(map, x, y, true);
+                        }
                     }
                 } else if (map.wallTypes[x][y] == IsometricGame.WallType.TRAVERSABLE) {
                     // Items dans les buissons
@@ -476,6 +571,24 @@ public class RealisticMapGenerator {
                 }
             }
         }
+
+        // Placer les clés restantes aléatoirement
+        List<String> remainingKeys = new ArrayList<>(keysGenerated);
+        for (String keyId : remainingKeys) {
+            // Trouver une position aléatoire accessible
+            for (int attempts = 0; attempts < 50; attempts++) {
+                int x = random.nextInt(MAP_SIZE);
+                int y = random.nextInt(MAP_SIZE);
+
+                if (map.wallTypes[x][y] == IsometricGame.WallType.NONE && map.itemMap[x][y].isEmpty()) {
+                    map.itemMap[x][y].add(new IsometricGame.Item("key_" + keyId, 1));
+                    totalKeys++;
+                    break;
+                }
+            }
+        }
+
+        System.out.println("✅ Items générés, dont " + totalKeys + " clés");
     }
 
     private static void addRandomItems(GeneratedMap map, int x, int y, boolean isIndoors) {
@@ -590,6 +703,27 @@ public class RealisticMapGenerator {
         }
         json.append("  ],\n");
 
+        // Sauvegarde des propriétés des murs (nouveau)
+        json.append("  \"wallProperties\": [\n");
+        for (int x = 0; x < MAP_SIZE; x++) {
+            json.append("    [\n");
+            for (int y = 0; y < MAP_SIZE; y++) {
+                WallProperties props = map.wallProperties[x][y];
+                json.append("      {");
+                json.append("\"isOpen\":").append(props.isOpen).append(", ");
+                json.append("\"isLocked\":").append(props.isLocked).append(", ");
+                json.append("\"keyId\":").append(props.keyId != null ? "\"" + props.keyId + "\"" : "null").append(", ");
+                json.append("\"health\":").append(props.health);
+                json.append("}");
+                if (y < MAP_SIZE - 1) json.append(",");
+                json.append("\n");
+            }
+            json.append("    ]");
+            if (x < MAP_SIZE - 1) json.append(",");
+            json.append("\n");
+        }
+        json.append("  ],\n");
+
         // Sauvegarde des items
         json.append("  \"itemMap\": [\n");
         for (int x = 0; x < MAP_SIZE; x++) {
@@ -638,15 +772,27 @@ public class RealisticMapGenerator {
         GeneratedMap map = generateVillageMap(100, "village_map.json");
 
         // Statistiques de génération
-        int totalWalls = 0, totalItems = 0;
+        int totalWalls = 0, totalItems = 0, totalKeys = 0;
+        int totalDoors = 0, totalLockedDoors = 0;
         Map<String, Integer> itemStats = new HashMap<>();
 
         for (int x = 0; x < MAP_SIZE; x++) {
             for (int y = 0; y < MAP_SIZE; y++) {
-                if (map.wallMap[x][y] != -1) totalWalls++;
+                if (map.wallMap[x][y] != -1) {
+                    totalWalls++;
+                    if (map.wallTypes[x][y] == IsometricGame.WallType.DOOR) {
+                        totalDoors++;
+                        if (map.wallProperties[x][y].isLocked) {
+                            totalLockedDoors++;
+                        }
+                    }
+                }
 
                 for (IsometricGame.Item item : map.itemMap[x][y]) {
                     totalItems += item.count;
+                    if (item.type.startsWith("key_")) {
+                        totalKeys += item.count;
+                    }
                     itemStats.put(item.type, itemStats.getOrDefault(item.type, 0) + item.count);
                 }
             }
@@ -655,11 +801,14 @@ public class RealisticMapGenerator {
         System.out.println("\n=== Statistiques de génération ===");
         System.out.println("Taille de la carte : " + MAP_SIZE + "x" + MAP_SIZE);
         System.out.println("Nombre total de murs/obstacles : " + totalWalls);
-        System.out.println("Nombre total d'items : " + totalItems);
+        System.out.println("Portes totales : " + totalDoors + " (dont " + totalLockedDoors + " verrouillées)");
+        System.out.println("Nombre total d'items : " + totalItems + " (dont " + totalKeys + " clés)");
         System.out.println("Répartition des items :");
-        itemStats.forEach((type, count) ->
-                System.out.println("  " + type + " : " + count)
-        );
+        itemStats.entrySet().stream()
+                .sorted((a, b) -> b.getValue().compareTo(a.getValue()))
+                .forEach((entry) ->
+                        System.out.println("  " + entry.getKey() + " : " + entry.getValue())
+                );
 
         System.out.println("\nCarte sauvegardée avec succès !");
     }

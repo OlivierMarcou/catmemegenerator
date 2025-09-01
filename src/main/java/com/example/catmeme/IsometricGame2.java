@@ -1,6 +1,5 @@
 package com.example.catmeme;
 
-
 import javafx.animation.AnimationTimer;
 import javafx.animation.KeyFrame;
 import javafx.animation.Timeline;
@@ -61,12 +60,16 @@ public class IsometricGame2 extends Application {
     private int[][] wallMap = new int[MAP_SIZE][MAP_SIZE];
     private int[][] ceilingMap = new int[MAP_SIZE][MAP_SIZE];
     private WallType[][] wallTypes = new WallType[MAP_SIZE][MAP_SIZE];
+    private WallProperties[][] wallProperties = new WallProperties[MAP_SIZE][MAP_SIZE];
     private List<Item>[][] itemMap = new List[MAP_SIZE][MAP_SIZE];
+    private Set<String> playerKeys = new HashSet<>(); // Clés possédées par le joueur
 
     // Animation
     private Timeline moveTimeline;
     private boolean showExclamation = false;
     private Timeline exclamationTimeline;
+    private String messageAbovePlayer = null; // Message à afficher au-dessus du personnage
+    private Timeline messageTimeline;
 
     // Types de murs
     enum WallType {
@@ -81,6 +84,23 @@ public class IsometricGame2 extends Application {
         Item(String type, int count) {
             this.type = type;
             this.count = count;
+        }
+    }
+
+    // Classe pour les propriétés avancées des murs
+    static class WallProperties {
+        boolean isOpen = false; // Pour les portes
+        boolean isLocked = false; // Pour les portes verrouillées
+        String keyId = null; // ID unique de la clé nécessaire
+        int health = 255; // Vie des murs destructibles (0-255)
+
+        WallProperties() {}
+
+        WallProperties(boolean isOpen, boolean isLocked, String keyId, int health) {
+            this.isOpen = isOpen;
+            this.isLocked = isLocked;
+            this.keyId = keyId;
+            this.health = Math.max(0, Math.min(255, health));
         }
     }
 
@@ -106,6 +126,7 @@ public class IsometricGame2 extends Application {
         // Événements souris
         canvas.setOnMouseMoved(this::onMouseMoved);
         canvas.setOnMouseClicked(this::onMouseClicked);
+        canvas.setOnMousePressed(this::onMousePressed); // Pour gérer les clics sur les portes
 
         primaryStage.setTitle("Jeu Isométrique - Village");
         primaryStage.setScene(scene);
@@ -426,8 +447,31 @@ public class IsometricGame2 extends Application {
         for (int x = 0; x < MAP_SIZE; x++) {
             for (int y = 0; y < MAP_SIZE; y++) {
                 itemMap[x][y] = new ArrayList<>();
+
+                // Initialiser les propriétés des murs
+                wallProperties[x][y] = new WallProperties();
+
+                // Configuration par défaut selon le type de mur
+                if (wallTypes[x][y] == WallType.DOOR) {
+                    // Portes fermées par défaut
+                    wallProperties[x][y].isOpen = false;
+
+                    // 20% de chance d'être verrouillées
+                    if (Math.random() < 0.2) {
+                        wallProperties[x][y].isLocked = true;
+                        wallProperties[x][y].keyId = "key_" + (x * MAP_SIZE + y); // ID unique
+                    }
+                } else if (wallTypes[x][y] == WallType.DESTRUCTIBLE) {
+                    // Murs destructibles avec vie aléatoire
+                    wallProperties[x][y].health = 100 + (int)(Math.random() * 156); // 100-255
+                }
             }
         }
+
+        // Ajouter quelques clés aléatoires au joueur pour test
+        playerKeys.add("key_1250");
+        playerKeys.add("key_750");
+        System.out.println("🗝️ Clés du joueur: " + playerKeys);
     }
 
     private void printLoadedMapStats() {
@@ -483,6 +527,18 @@ public class IsometricGame2 extends Application {
                 if (rand.nextDouble() < 0.03) {
                     itemMap[x][y].add(new Item("treasure", 1 + rand.nextInt(3)));
                 }
+
+                // Initialiser les propriétés des murs
+                wallProperties[x][y] = new WallProperties();
+                if (wallTypes[x][y] == WallType.DOOR) {
+                    // Quelques portes verrouillées pour test
+                    if (rand.nextDouble() < 0.3) {
+                        wallProperties[x][y].isLocked = true;
+                        wallProperties[x][y].keyId = "key_" + (x * MAP_SIZE + y);
+                    }
+                } else if (wallTypes[x][y] == WallType.DESTRUCTIBLE) {
+                    wallProperties[x][y].health = 50 + rand.nextInt(206); // 50-255
+                }
             }
         }
     }
@@ -491,12 +547,32 @@ public class IsometricGame2 extends Application {
         mouseX = e.getX();
         mouseY = e.getY();
 
+        // Debug des coordonnées (activer au besoin)
+        // System.out.println("Mouse: (" + String.format("%.1f", mouseX) + ", " + String.format("%.1f", mouseY) + ")");
+
         double centerX = CANVAS_WIDTH / 2;
         double centerY = CANVAS_HEIGHT / 2;
         playerAngle = Math.atan2(mouseY - centerY, mouseX - centerX);
 
-        // Calculer la position de la tuile sous le curseur
-        mouseHoverPos = screenToTile(mouseX, mouseY);
+        // Calculer la position de la tuile sous le curseur avec vérification
+        Point2D calculatedTile = screenToTile(mouseX, mouseY);
+
+        // Vérifier que la conversion est cohérente
+        if (calculatedTile != null && isValidTile((int)calculatedTile.getX(), (int)calculatedTile.getY())) {
+            mouseHoverPos = calculatedTile;
+
+            // Debug optionnel de la conversion
+            /*
+            Point2D backToScreen = tileToScreen(calculatedTile.getX(), calculatedTile.getY());
+            double deltaX = Math.abs(backToScreen.getX() - mouseX);
+            double deltaY = Math.abs(backToScreen.getY() - mouseY);
+            if (deltaX > TILE_WIDTH || deltaY > TILE_HEIGHT) {
+                System.out.println("⚠️ Décalage détecté: ΔX=" + String.format("%.1f", deltaX) + ", ΔY=" + String.format("%.1f", deltaY));
+            }
+            */
+        } else {
+            mouseHoverPos = null;
+        }
     }
 
     private void onMouseClicked(MouseEvent e) {
@@ -507,19 +583,77 @@ public class IsometricGame2 extends Application {
         }
     }
 
-    private Point2D screenToTile(double screenX, double screenY) {
-        double relX = screenX - CANVAS_WIDTH / 2 + cameraX;
-        double relY = screenY - CANVAS_HEIGHT / 2 + cameraY;
+    private void onMousePressed(MouseEvent e) {
+        Point2D clickedTile = screenToTile(e.getX(), e.getY());
+        if (clickedTile != null && isValidTile((int)clickedTile.getX(), (int)clickedTile.getY())) {
+            handleDoorInteraction((int)clickedTile.getX(), (int)clickedTile.getY());
+        }
+    }
 
-        double tileX = (relX / TILE_WIDTH + relY / TILE_HEIGHT) / 2;
-        double tileY = (relY / TILE_HEIGHT - relX / TILE_WIDTH) / 2;
+    private void handleDoorInteraction(int x, int y) {
+        // Vérifier si c'est une porte
+        if (wallTypes[x][y] != WallType.DOOR || wallMap[x][y] == -1) {
+            return;
+        }
+
+        // Vérifier si le joueur est adjacent à la porte
+        double distance = Math.abs(x - playerPos.getX()) + Math.abs(y - playerPos.getY());
+        if (distance > 1.5) { // Un peu de marge pour la diagonale
+            return;
+        }
+
+        WallProperties props = wallProperties[x][y];
+        if (props == null) {
+            props = new WallProperties();
+            wallProperties[x][y] = props;
+        }
+
+        // Si la porte est verrouillée
+        if (props.isLocked && props.keyId != null) {
+            if (!playerKeys.contains(props.keyId)) {
+                showMessageAbovePlayer("Need Key", Color.RED);
+                System.out.println("🔒 Porte verrouillée - Clé requise: " + props.keyId);
+                return;
+            } else {
+                // Déverrouiller la porte avec la clé
+                props.isLocked = false;
+                showMessageAbovePlayer("Unlocked!", Color.GREEN);
+                System.out.println("🔓 Porte déverrouillée avec la clé: " + props.keyId);
+            }
+        }
+
+        // Ouvrir/fermer la porte
+        props.isOpen = !props.isOpen;
+        String status = props.isOpen ? "ouvert" : "fermé";
+        showMessageAbovePlayer(props.isOpen ? "Opened" : "Closed", Color.YELLOW);
+        System.out.println("🚪 Porte " + status + " à la position (" + x + ", " + y + ")");
+    }
+
+    private Point2D screenToTile(double screenX, double screenY) {
+        // Obtenir les coordonnées relatives au canvas (pas à l'écran)
+        double canvasX = screenX;
+        double canvasY = screenY;
+
+        // Convertir en coordonnées monde (avec la caméra)
+        double worldX = canvasX - CANVAS_WIDTH / 2 + cameraX;
+        double worldY = canvasY - CANVAS_HEIGHT / 2 + cameraY;
+
+        // Conversion isométrique vers coordonnées de grille
+        double tileX = (worldX / (TILE_WIDTH / 2) + worldY / (TILE_HEIGHT / 2)) / 2;
+        double tileY = (worldY / (TILE_HEIGHT / 2) - worldX / (TILE_WIDTH / 2)) / 2;
 
         return new Point2D(Math.floor(tileX), Math.floor(tileY));
     }
 
     private Point2D tileToScreen(double tileX, double tileY) {
-        double screenX = (tileX - tileY) * TILE_WIDTH / 2 - cameraX + CANVAS_WIDTH / 2;
-        double screenY = (tileX + tileY) * TILE_HEIGHT / 2 - cameraY + CANVAS_HEIGHT / 2;
+        // Conversion grille vers coordonnées monde
+        double worldX = (tileX - tileY) * (TILE_WIDTH / 2);
+        double worldY = (tileX + tileY) * (TILE_HEIGHT / 2);
+
+        // Conversion monde vers coordonnées écran (avec la caméra)
+        double screenX = worldX - cameraX + CANVAS_WIDTH / 2;
+        double screenY = worldY - cameraY + CANVAS_HEIGHT / 2;
+
         return new Point2D(screenX, screenY);
     }
 
@@ -529,7 +663,19 @@ public class IsometricGame2 extends Application {
 
     private boolean canWalkThrough(int x, int y) {
         if (!isValidTile(x, y)) return false;
+
         WallType wall = wallTypes[x][y];
+
+        // Cas spécial pour les portes
+        if (wall == WallType.DOOR) {
+            WallProperties props = wallProperties[x][y];
+            if (props != null && props.isOpen) {
+                return true; // Porte ouverte = traversable
+            } else {
+                return false; // Porte fermée = non traversable
+            }
+        }
+
         return wall == WallType.NONE || wall == WallType.TRAVERSABLE || wall == WallType.TRANSPARENT;
     }
 
@@ -558,6 +704,15 @@ public class IsometricGame2 extends Application {
         moveTimeline.play();
     }
 
+    private void showExclamationMark() {
+        showExclamation = true;
+        if (exclamationTimeline != null) {
+            exclamationTimeline.stop();
+        }
+        exclamationTimeline = new Timeline(new KeyFrame(Duration.seconds(2), e -> showExclamation = false));
+        exclamationTimeline.play();
+    }
+
     private void updateMovement() {
         if (!isMoving || path.isEmpty()) return;
 
@@ -578,16 +733,25 @@ public class IsometricGame2 extends Application {
             playerPos = path.get(currentPathIndex - 1);
         }
 
-        // Mise à jour caméra pour suivre le mouvement
-        Point2D currentTarget = path.get(Math.min(currentPathIndex, path.size() - 1));
-        Point2D screenPos = tileToScreen(currentTarget.getX(), currentTarget.getY());
+        // Mise à jour caméra pour suivre le mouvement - CORRECTION ICI
+        // Calculer la position interpolée du personnage
+        Point2D currentPos = playerPos;
+        if (currentPathIndex < path.size()) {
+            Point2D nextPos = path.get(currentPathIndex);
+            // Interpolation entre la position actuelle et la suivante
+            double interpX = currentPos.getX() + (nextPos.getX() - currentPos.getX()) * moveProgress;
+            double interpY = currentPos.getY() + (nextPos.getY() - currentPos.getY()) * moveProgress;
+            currentPos = new Point2D(interpX, interpY);
+        }
 
-        // Suivre le personnage avec un mouvement fluide de caméra
-        double targetCameraX = screenPos.getX() - CANVAS_WIDTH / 2;
-        double targetCameraY = screenPos.getY() - CANVAS_HEIGHT / 2;
+        // Centrer la caméra sur la position interpolée du personnage
+        Point2D playerScreenPos = tileToScreen(currentPos.getX(), currentPos.getY());
+        double targetCameraX = playerScreenPos.getX() - CANVAS_WIDTH / 2;
+        double targetCameraY = playerScreenPos.getY() - CANVAS_HEIGHT / 2;
 
-        cameraX += (targetCameraX - cameraX) * 0.1;
-        cameraY += (targetCameraY - cameraY) * 0.1;
+        // Mouvement fluide de caméra (plus lent pour éviter les sauts)
+        cameraX += (targetCameraX - cameraX) * 0.05; // Réduit de 0.1 à 0.05
+        cameraY += (targetCameraY - cameraY) * 0.05;
     }
 
     private List<Point2D> findPath(Point2D start, Point2D end) {
@@ -649,13 +813,15 @@ public class IsometricGame2 extends Application {
         return path;
     }
 
-    private void showExclamationMark() {
-        showExclamation = true;
-        if (exclamationTimeline != null) {
-            exclamationTimeline.stop();
+    private void showMessageAbovePlayer(String message, Color color) {
+        messageAbovePlayer = message;
+
+        if (messageTimeline != null) {
+            messageTimeline.stop();
         }
-        exclamationTimeline = new Timeline(new KeyFrame(Duration.seconds(2), e -> showExclamation = false));
-        exclamationTimeline.play();
+
+        messageTimeline = new Timeline(new KeyFrame(Duration.seconds(2), e -> messageAbovePlayer = null));
+        messageTimeline.play();
     }
 
     private void render() {
@@ -728,11 +894,35 @@ public class IsometricGame2 extends Application {
 
         // Murs
         if (wallMap[x][y] >= 0) {
-            Image wallImg = wallImages.get("wall_" + wallMap[x][y]);
+            // Déterminer l'image à utiliser (normale ou porte ouverte)
+            String wallImageKey = "wall_" + wallMap[x][y];
+
+            // Cas spécial pour les portes ouvertes
+            if (wallTypes[x][y] == WallType.DOOR) {
+                WallProperties props = wallProperties[x][y];
+                if (props != null && props.isOpen) {
+                    wallImageKey = "wall_" + wallMap[x][y] + "_o"; // Image porte ouverte
+                }
+            }
+
+            Image wallImg = wallImages.get(wallImageKey);
+            if (wallImg == null) {
+                // Fallback vers l'image normale si l'image ouverte n'existe pas
+                wallImg = wallImages.get("wall_" + wallMap[x][y]);
+            }
+
             if (wallImg != null) {
                 gc.setGlobalAlpha(alpha);
                 gc.drawImage(wallImg, screenX - TILE_WIDTH/2, screenY - WALL_HEIGHT + TILE_HEIGHT/2);
                 gc.setGlobalAlpha(1.0);
+
+                // Afficher la santé des murs destructibles
+                if (wallTypes[x][y] == WallType.DESTRUCTIBLE) {
+                    WallProperties props = wallProperties[x][y];
+                    if (props != null && props.health < 255) {
+                        renderHealthBar(screenX, screenY - WALL_HEIGHT + TILE_HEIGHT/2, props.health);
+                    }
+                }
             }
         }
 
@@ -796,6 +986,41 @@ public class IsometricGame2 extends Application {
             gc.setFill(Color.RED);
             gc.fillText("!", screenX - 3, screenY - 18);
         }
+
+        // Message au-dessus du personnage
+        if (messageAbovePlayer != null) {
+            gc.setFill(Color.WHITE);
+            gc.fillText(messageAbovePlayer, screenX - messageAbovePlayer.length() * 3, screenY - 30);
+        }
+    }
+
+    private void renderHealthBar(double x, double y, int health) {
+        // Barre de santé pour les murs destructibles
+        double barWidth = 30;
+        double barHeight = 4;
+        double healthPercent = health / 255.0;
+
+        // Fond de la barre
+        gc.setFill(Color.BLACK.deriveColor(0, 1, 1, 0.7));
+        gc.fillRect(x - barWidth/2, y - 10, barWidth, barHeight);
+
+        // Barre de santé colorée
+        Color healthColor;
+        if (healthPercent > 0.6) {
+            healthColor = Color.GREEN;
+        } else if (healthPercent > 0.3) {
+            healthColor = Color.ORANGE;
+        } else {
+            healthColor = Color.RED;
+        }
+
+        gc.setFill(healthColor);
+        gc.fillRect(x - barWidth/2, y - 10, barWidth * healthPercent, barHeight);
+
+        // Contour
+        gc.setStroke(Color.WHITE);
+        gc.setLineWidth(1);
+        gc.strokeRect(x - barWidth/2, y - 10, barWidth, barHeight);
     }
 
     private void renderMouseIndicators() {
@@ -851,6 +1076,34 @@ public class IsometricGame2 extends Application {
 
         System.out.println("📷 Caméra centrée sur le personnage à la position (" +
                 (int)playerPos.getX() + ", " + (int)playerPos.getY() + ")");
+        System.out.println("   Position caméra: (" + String.format("%.1f", cameraX) + ", " + String.format("%.1f", cameraY) + ")");
+    }
+
+    private void smoothCenterCameraOnPlayer() {
+        // Version douce pour recentrer pendant le jeu
+        Point2D playerScreenPos = tileToScreen(playerPos.getX(), playerPos.getY());
+        double targetCameraX = playerScreenPos.getX() - CANVAS_WIDTH / 2;
+        double targetCameraY = playerScreenPos.getY() - CANVAS_HEIGHT / 2;
+
+        // Animation douce vers la position centrée
+        Timeline cameraTimeline = new Timeline();
+        final double startCameraX = cameraX;
+        final double startCameraY = cameraY;
+
+        KeyFrame keyFrame = new KeyFrame(Duration.millis(16), e -> {
+            double progress = cameraTimeline.getCurrentTime().toMillis() / 500.0; // 500ms pour recentrer
+            progress = Math.min(1.0, progress);
+
+            // Interpolation douce (easing)
+            double eased = 1 - Math.pow(1 - progress, 3); // Cubic ease-out
+
+            cameraX = startCameraX + (targetCameraX - startCameraX) * eased;
+            cameraY = startCameraY + (targetCameraY - startCameraY) * eased;
+        });
+
+        cameraTimeline.getKeyFrames().add(keyFrame);
+        cameraTimeline.setCycleCount((int)(500 / 16)); // 500ms à 60fps
+        cameraTimeline.play();
     }
 
     // Classe Node pour A*
