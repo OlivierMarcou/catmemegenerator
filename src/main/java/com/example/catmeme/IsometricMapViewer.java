@@ -1,16 +1,16 @@
 package com.example.catmeme;
-
-import javafx.animation.AnimationTimer;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.scene.Scene;
 import javafx.scene.canvas.Canvas;
 import javafx.scene.canvas.GraphicsContext;
-import javafx.scene.image.Image;
-import javafx.scene.input.KeyCode;
 import javafx.scene.layout.StackPane;
 import javafx.scene.paint.Color;
+import javafx.scene.image.Image;
 import javafx.stage.Stage;
+import javafx.animation.AnimationTimer;
+import javafx.scene.input.KeyCode;
+import javafx.scene.input.MouseEvent;
 
 import java.util.*;
 
@@ -48,6 +48,13 @@ public class IsometricMapViewer extends Application {
     // Gestion des touches
     private Set<KeyCode> pressedKeys = new HashSet<>();
 
+    // Navigation automatique
+    private List<Point> currentPath = new ArrayList<>();
+    private int currentPathIndex = 0;
+    private boolean isAutoMoving = false;
+    private boolean pathBlocked = false;
+    private long pathBlockedTime = 0;
+
     // Animation
     private AnimationTimer animationTimer;
 
@@ -83,8 +90,8 @@ public class IsometricMapViewer extends Application {
 
         Scene scene = new Scene(root, CANVAS_WIDTH, CANVAS_HEIGHT);
 
-        // Gestion des événements clavier
-        setupKeyHandling(scene);
+        // Gestion des événements clavier et souris
+        setupInputHandling(scene, canvas);
 
         // Configuration de la fenêtre
         primaryStage.setTitle("Visualiseur isométrique 3D - ZQSD: déplacement, A/E: rotation");
@@ -114,18 +121,14 @@ public class IsometricMapViewer extends Application {
 
         System.out.println("Chargement des images isométriques...");
 
-
-        System.out.println("Aucune image trouvée dans /resources/, tentative dans le classpath racine...");
-
+        // Chargement de toutes les images disponibles
         for (int i = 1; i <= 100; i++) {
             String resourcePath = "/" + i + ".jpg";
 
             try {
                 var imageStream = getClass().getResourceAsStream(resourcePath);
-
                 if (imageStream != null) {
                     Image image = new Image(imageStream);
-
                     if (!image.isError()) {
                         // Les 25 premières sont les sols, les suivantes les murs
                         if (i <= 25) {
@@ -135,15 +138,14 @@ public class IsometricMapViewer extends Application {
                         }
                         System.out.println("Image chargée: " + i + " (" +
                                 (i <= 25 ? "sol" : "mur") + ")");
-//                            loadedImages.add(image);
-//                            System.out.println("Image chargée: " + resourcePath);
                     }
                     imageStream.close();
                 }
             } catch (Exception e) {
-                System.err.println("Impossible de charger: " + resourcePath + " - " + e.getMessage());
+                // Pas d'erreur si l'image n'existe pas
             }
         }
+
         System.out.println("Images de sol: " + groundImages.size());
         System.out.println("Images de mur: " + wallImages.size());
     }
@@ -184,9 +186,185 @@ public class IsometricMapViewer extends Application {
         System.out.println("Carte générée: " + MAP_SIZE + "x" + MAP_SIZE + " avec 3 couches");
     }
 
-    private void setupKeyHandling(Scene scene) {
+    private void setupInputHandling(Scene scene, Canvas canvas) {
+        // Gestion du clavier
         scene.setOnKeyPressed(e -> pressedKeys.add(e.getCode()));
         scene.setOnKeyReleased(e -> pressedKeys.remove(e.getCode()));
+
+        // Gestion de la souris
+        canvas.setOnMouseClicked(this::handleMouseClick);
+    }
+
+    private void handleMouseClick(MouseEvent event) {
+        double mouseX = event.getX();
+        double mouseY = event.getY();
+
+        // Conversion des coordonnées écran vers coordonnées de carte
+        Point mapCoord = screenToMapCoordinates(mouseX, mouseY);
+
+        if (mapCoord != null && isValidMapPosition(mapCoord.x, mapCoord.y)) {
+            System.out.println("Clic sur: (" + mapCoord.x + ", " + mapCoord.y + ")");
+
+            // Vérification que c'est un sol libre
+            if (map[mapCoord.x][mapCoord.y][LAYER_WALL] == 0) {
+                navigateToPosition(mapCoord.x, mapCoord.y);
+            } else {
+                System.out.println("Position bloquée par un mur");
+            }
+        }
+    }
+
+    private Point screenToMapCoordinates(double screenX, double screenY) {
+        // Conversion inverse de la projection isométrique
+        double relativeX = screenX - cameraOffsetX;
+        double relativeY = screenY - cameraOffsetY;
+
+        // Formules de conversion inverse
+        double mapX = (relativeX / (TILE_WIDTH / 2.0) + relativeY / (TILE_HEIGHT / 2.0)) / 2.0;
+        double mapY = (relativeY / (TILE_HEIGHT / 2.0) - relativeX / (TILE_WIDTH / 2.0)) / 2.0;
+
+        return new Point((int) Math.round(mapX), (int) Math.round(mapY));
+    }
+
+    private boolean isValidMapPosition(int x, int y) {
+        return x >= 0 && x < MAP_SIZE && y >= 0 && y < MAP_SIZE;
+    }
+
+    private void navigateToPosition(int targetX, int targetY) {
+        Point start = new Point((int) Math.round(playerX), (int) Math.round(playerY));
+        Point target = new Point(targetX, targetY);
+
+        // Calcul du chemin avec A*
+        List<Point> path = findPath(start, target);
+
+        if (path != null && path.size() > 1) {
+            currentPath = path;
+            currentPathIndex = 1; // Ignore le point de départ
+            isAutoMoving = true;
+            pathBlocked = false;
+
+            System.out.println("Chemin trouvé: " + path.size() + " points");
+
+            // Orientation vers la première destination
+            Point nextPoint = currentPath.get(currentPathIndex);
+            turnTowardsTarget(nextPoint.x, nextPoint.y);
+        } else {
+            // Pas de chemin trouvé
+            pathBlocked = true;
+            pathBlockedTime = System.currentTimeMillis();
+            isAutoMoving = false;
+            System.out.println("Aucun chemin trouvé vers la destination");
+        }
+    }
+
+    private List<Point> findPath(Point start, Point goal) {
+        // Algorithme A* pour le pathfinding
+        PriorityQueue<AStarNode> openSet = new PriorityQueue<>(Comparator.comparingDouble(n -> n.fCost));
+        Set<String> closedSet = new HashSet<>();
+        Map<String, AStarNode> allNodes = new HashMap<>();
+
+        AStarNode startNode = new AStarNode(start.x, start.y, null);
+        startNode.gCost = 0;
+        startNode.hCost = manhattanDistance(start, goal);
+        startNode.fCost = startNode.gCost + startNode.hCost;
+
+        openSet.add(startNode);
+        allNodes.put(start.x + "," + start.y, startNode);
+
+        // Directions de mouvement (8 directions)
+        int[][] directions = {{0,1}, {1,0}, {0,-1}, {-1,0}, {1,1}, {1,-1}, {-1,1}, {-1,-1}};
+
+        while (!openSet.isEmpty()) {
+            AStarNode current = openSet.poll();
+            String currentKey = current.x + "," + current.y;
+
+            if (closedSet.contains(currentKey)) {
+                continue;
+            }
+
+            closedSet.add(currentKey);
+
+            // Destination atteinte
+            if (current.x == goal.x && current.y == goal.y) {
+                return reconstructPath(current);
+            }
+
+            // Exploration des voisins
+            for (int[] dir : directions) {
+                int newX = current.x + dir[0];
+                int newY = current.y + dir[1];
+                String neighborKey = newX + "," + newY;
+
+                // Vérifications de validité
+                if (!isValidMapPosition(newX, newY) ||
+                        closedSet.contains(neighborKey) ||
+                        map[newX][newY][LAYER_WALL] != 0) {
+                    continue;
+                }
+
+                double moveCost = (Math.abs(dir[0]) + Math.abs(dir[1]) == 2) ? 1.414 : 1.0; // Diagonale vs orthogonal
+                double tentativeGCost = current.gCost + moveCost;
+
+                AStarNode neighbor = allNodes.get(neighborKey);
+                if (neighbor == null) {
+                    neighbor = new AStarNode(newX, newY, current);
+                    neighbor.gCost = tentativeGCost;
+                    neighbor.hCost = manhattanDistance(new Point(newX, newY), goal);
+                    neighbor.fCost = neighbor.gCost + neighbor.hCost;
+
+                    allNodes.put(neighborKey, neighbor);
+                    openSet.add(neighbor);
+                } else if (tentativeGCost < neighbor.gCost) {
+                    neighbor.parent = current;
+                    neighbor.gCost = tentativeGCost;
+                    neighbor.fCost = neighbor.gCost + neighbor.hCost;
+
+                    // Mise à jour dans la queue
+                    openSet.remove(neighbor);
+                    openSet.add(neighbor);
+                }
+            }
+        }
+
+        return null; // Aucun chemin trouvé
+    }
+
+    private double manhattanDistance(Point a, Point b) {
+        return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+    }
+
+    private List<Point> reconstructPath(AStarNode endNode) {
+        List<Point> path = new ArrayList<>();
+        AStarNode current = endNode;
+
+        while (current != null) {
+            path.add(0, new Point(current.x, current.y));
+            current = current.parent;
+        }
+
+        return path;
+    }
+
+    private void turnTowardsTarget(int targetX, int targetY) {
+        double dx = targetX - playerX;
+        double dy = targetY - playerY;
+
+        // Calcul de l'angle vers la cible
+        double angle = Math.atan2(dy, dx);
+
+        // Conversion en direction (0=Nord, 1=Est, 2=Sud, 3=Ouest)
+        int targetDirection = 0;
+        if (angle >= -Math.PI/4 && angle < Math.PI/4) {
+            targetDirection = 1; // Est
+        } else if (angle >= Math.PI/4 && angle < 3*Math.PI/4) {
+            targetDirection = 2; // Sud
+        } else if (angle >= 3*Math.PI/4 || angle < -3*Math.PI/4) {
+            targetDirection = 3; // Ouest
+        } else {
+            targetDirection = 0; // Nord
+        }
+
+        playerDirection = targetDirection;
     }
 
     private void startGameLoop(GraphicsContext gc) {
@@ -227,69 +405,37 @@ public class IsometricMapViewer extends Application {
 
         if (pressedKeys.contains(KeyCode.Z)) { // Avancer
             switch (playerDirection) {
-                case 0:
-                    newY -= moveSpeed;
-                    break; // Nord
-                case 1:
-                    newX += moveSpeed;
-                    break; // Est
-                case 2:
-                    newY += moveSpeed;
-                    break; // Sud
-                case 3:
-                    newX -= moveSpeed;
-                    break; // Ouest
+                case 0: newY -= moveSpeed; break; // Nord
+                case 1: newX += moveSpeed; break; // Est
+                case 2: newY += moveSpeed; break; // Sud
+                case 3: newX -= moveSpeed; break; // Ouest
             }
             moved = true;
         }
         if (pressedKeys.contains(KeyCode.S)) { // Reculer
             switch (playerDirection) {
-                case 0:
-                    newY += moveSpeed;
-                    break; // Nord
-                case 1:
-                    newX -= moveSpeed;
-                    break; // Est
-                case 2:
-                    newY -= moveSpeed;
-                    break; // Sud
-                case 3:
-                    newX += moveSpeed;
-                    break; // Ouest
+                case 0: newY += moveSpeed; break; // Nord
+                case 1: newX -= moveSpeed; break; // Est
+                case 2: newY -= moveSpeed; break; // Sud
+                case 3: newX += moveSpeed; break; // Ouest
             }
             moved = true;
         }
         if (pressedKeys.contains(KeyCode.Q)) { // Gauche
             switch (playerDirection) {
-                case 0:
-                    newX -= moveSpeed;
-                    break; // Nord
-                case 1:
-                    newY -= moveSpeed;
-                    break; // Est
-                case 2:
-                    newX += moveSpeed;
-                    break; // Sud
-                case 3:
-                    newY += moveSpeed;
-                    break; // Ouest
+                case 0: newX -= moveSpeed; break; // Nord
+                case 1: newY -= moveSpeed; break; // Est
+                case 2: newX += moveSpeed; break; // Sud
+                case 3: newY += moveSpeed; break; // Ouest
             }
             moved = true;
         }
         if (pressedKeys.contains(KeyCode.D)) { // Droite
             switch (playerDirection) {
-                case 0:
-                    newX += moveSpeed;
-                    break; // Nord
-                case 1:
-                    newY += moveSpeed;
-                    break; // Est
-                case 2:
-                    newX -= moveSpeed;
-                    break; // Sud
-                case 3:
-                    newY -= moveSpeed;
-                    break; // Ouest
+                case 0: newX += moveSpeed; break; // Nord
+                case 1: newY += moveSpeed; break; // Est
+                case 2: newX -= moveSpeed; break; // Sud
+                case 3: newY -= moveSpeed; break; // Ouest
             }
             moved = true;
         }
@@ -315,9 +461,13 @@ public class IsometricMapViewer extends Application {
     }
 
     private void updateCamera() {
-        // Centrage de la caméra sur le joueur
-        cameraOffsetX = CANVAS_WIDTH / 2 - playerX * TILE_WIDTH;
-        cameraOffsetY = CANVAS_HEIGHT / 2 - playerY * TILE_HEIGHT;
+        // La caméra suit le joueur en convertissant sa position en coordonnées isométriques
+        double playerIsoX = (playerX - playerY) * (TILE_WIDTH / 2.0);
+        double playerIsoY = (playerX + playerY) * (TILE_HEIGHT / 2.0);
+
+        // L'offset de caméra centre la vue sur le joueur
+        cameraOffsetX = CANVAS_WIDTH / 2.0 - playerIsoX;
+        cameraOffsetY = CANVAS_HEIGHT / 2.0 - playerIsoY;
     }
 
     private void render(GraphicsContext gc) {
@@ -418,16 +568,11 @@ public class IsometricMapViewer extends Application {
 
     private double[] getDirectionVector() {
         switch (playerDirection) {
-            case 0:
-                return new double[]{0, -1}; // Nord
-            case 1:
-                return new double[]{1, 0};  // Est
-            case 2:
-                return new double[]{0, 1};  // Sud
-            case 3:
-                return new double[]{-1, 0}; // Ouest
-            default:
-                return new double[]{0, -1};
+            case 0: return new double[]{0, -1}; // Nord
+            case 1: return new double[]{1, 0};  // Est
+            case 2: return new double[]{0, 1};  // Sud
+            case 3: return new double[]{-1, 0}; // Ouest
+            default: return new double[]{0, -1};
         }
     }
 
@@ -448,7 +593,7 @@ public class IsometricMapViewer extends Application {
         if (image != null) {
             gc.save();
             gc.setGlobalAlpha(tile.alpha);
-            gc.drawImage(image, tile.screenX - TILE_WIDTH / 2, tile.screenY - TILE_HEIGHT,
+            gc.drawImage(image, tile.screenX - TILE_WIDTH/2, tile.screenY - TILE_HEIGHT,
                     TILE_WIDTH, TILE_WIDTH * image.getHeight() / image.getWidth());
             gc.restore();
         }
@@ -457,6 +602,13 @@ public class IsometricMapViewer extends Application {
     private void renderPlayer(GraphicsContext gc) {
         double playerScreenX = cameraOffsetX;
         double playerScreenY = cameraOffsetY;
+
+        // Point d'exclamation si le chemin est bloqué
+        if (pathBlocked && System.currentTimeMillis() - pathBlockedTime < 3000) {
+            gc.setFill(Color.RED);
+            gc.setFont(javafx.scene.text.Font.font(20));
+            gc.fillText("!", playerScreenX - 4, playerScreenY - 20);
+        }
 
         // Cercle du joueur avec couleur selon l'orientation
         gc.setFill(playerColors[playerDirection]);
@@ -477,6 +629,27 @@ public class IsometricMapViewer extends Application {
         gc.strokeLine(playerScreenX, playerScreenY,
                 playerScreenX + dirVec[0] * arrowLength,
                 playerScreenY + dirVec[1] * arrowLength);
+
+        // Affichage du chemin si navigation active
+        if (isAutoMoving && !currentPath.isEmpty()) {
+            gc.setStroke(Color.LIME);
+            gc.setLineWidth(2);
+
+            for (int i = currentPathIndex; i < currentPath.size(); i++) {
+                Point p = currentPath.get(i);
+                double pathX = (p.x - playerX) * TILE_WIDTH + playerScreenX;
+                double pathY = (p.y - playerY) * TILE_HEIGHT + playerScreenY;
+
+                gc.strokeOval(pathX - 3, pathY - 3, 6, 6);
+
+                if (i > currentPathIndex) {
+                    Point prev = currentPath.get(i - 1);
+                    double prevX = (prev.x - playerX) * TILE_WIDTH + playerScreenX;
+                    double prevY = (prev.y - playerY) * TILE_HEIGHT + playerScreenY;
+                    gc.strokeLine(prevX, prevY, pathX, pathY);
+                }
+            }
+        }
     }
 
     private void renderUI(GraphicsContext gc) {
@@ -490,8 +663,18 @@ public class IsometricMapViewer extends Application {
         gc.fillText("Contrôles:", 10, 70);
         gc.fillText("ZQSD: Déplacement", 10, 90);
         gc.fillText("A/E: Rotation", 10, 110);
+        gc.fillText("Clic souris: Navigation auto", 10, 130);
 
-        gc.fillText("Images chargées: " + (groundImages.size() + wallImages.size()), 10, 140);
+        if (isAutoMoving) {
+            gc.setFill(Color.LIME);
+            gc.fillText("Navigation automatique active", 10, 160);
+        } else if (pathBlocked && System.currentTimeMillis() - pathBlockedTime < 3000) {
+            gc.setFill(Color.RED);
+            gc.fillText("Destination inaccessible !", 10, 160);
+        }
+
+        gc.setFill(Color.WHITE);
+        gc.fillText("Images chargées: " + (groundImages.size() + wallImages.size()), 10, 180);
     }
 
     // Classe pour stocker les informations de rendu d'une tuile
@@ -507,6 +690,33 @@ public class IsometricMapViewer extends Application {
             this.screenX = screenX;
             this.screenY = screenY;
             this.alpha = alpha;
+        }
+    }
+
+    // Classes pour le pathfinding A*
+    private static class Point {
+        int x, y;
+
+        Point(int x, int y) {
+            this.x = x;
+            this.y = y;
+        }
+
+        @Override
+        public String toString() {
+            return "(" + x + "," + y + ")";
+        }
+    }
+
+    private static class AStarNode {
+        int x, y;
+        AStarNode parent;
+        double gCost, hCost, fCost;
+
+        AStarNode(int x, int y, AStarNode parent) {
+            this.x = x;
+            this.y = y;
+            this.parent = parent;
         }
     }
 
