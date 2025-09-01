@@ -36,8 +36,8 @@ public class IsometricGame2 extends Application {
     private GraphicsContext gc;
 
     // Position de la caméra et du joueur
-    private double cameraX = MAP_SIZE * TILE_WIDTH / 4;
-    private double cameraY = MAP_SIZE * TILE_HEIGHT / 4;
+    private double cameraX;
+    private double cameraY;
     private Point2D playerPos = new Point2D(MAP_SIZE / 2, MAP_SIZE / 2);
     private Point2D targetPos = null;
     private Point2D clickedPos = null; // Position où on a cliqué
@@ -90,6 +90,9 @@ public class IsometricGame2 extends Application {
 
         initializeImages();
         initializeMaps();
+
+        // Centrer la caméra sur le personnage après initialisation des cartes
+        centerCameraOnPlayer();
 
         canvas = new Canvas(CANVAS_WIDTH, CANVAS_HEIGHT);
         gc = canvas.getGraphicsContext2D();
@@ -575,11 +578,16 @@ public class IsometricGame2 extends Application {
             playerPos = path.get(currentPathIndex - 1);
         }
 
-        // Mise à jour caméra
+        // Mise à jour caméra pour suivre le mouvement
         Point2D currentTarget = path.get(Math.min(currentPathIndex, path.size() - 1));
         Point2D screenPos = tileToScreen(currentTarget.getX(), currentTarget.getY());
-        cameraX += (screenPos.getX() - CANVAS_WIDTH / 2) * 0.1;
-        cameraY += (screenPos.getY() - CANVAS_HEIGHT / 2) * 0.1;
+
+        // Suivre le personnage avec un mouvement fluide de caméra
+        double targetCameraX = screenPos.getX() - CANVAS_WIDTH / 2;
+        double targetCameraY = screenPos.getY() - CANVAS_HEIGHT / 2;
+
+        cameraX += (targetCameraX - cameraX) * 0.1;
+        cameraY += (targetCameraY - cameraY) * 0.1;
     }
 
     private List<Point2D> findPath(Point2D start, Point2D end) {
@@ -831,6 +839,18 @@ public class IsometricGame2 extends Application {
         gc.setStroke(color.deriveColor(0, 1, 0.7, 0.8));
         gc.setLineWidth(2);
         gc.strokePolygon(xPoints, yPoints, 4);
+    }
+
+    private void centerCameraOnPlayer() {
+        // Calculer la position écran du personnage
+        Point2D playerScreenPos = tileToScreen(playerPos.getX(), playerPos.getY());
+
+        // Ajuster la caméra pour centrer le personnage à l'écran
+        cameraX = playerScreenPos.getX() - CANVAS_WIDTH / 2;
+        cameraY = playerScreenPos.getY() - CANVAS_HEIGHT / 2;
+
+        System.out.println("📷 Caméra centrée sur le personnage à la position (" +
+                (int)playerPos.getX() + ", " + (int)playerPos.getY() + ")");
     }
 
     // Classe Node pour A*
