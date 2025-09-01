@@ -111,11 +111,11 @@ public class IsometricGame2 extends Application {
         initializeImages();
         initializeMaps();
 
-        // Centrer la caméra sur le personnage après initialisation des cartes
-        centerCameraOnPlayer();
-
         canvas = new Canvas(CANVAS_WIDTH, CANVAS_HEIGHT);
         gc = canvas.getGraphicsContext2D();
+
+        // IMPORTANT : Centrer la caméra APRÈS la création du canvas
+        centerCameraOnPlayer();
 
         // Optimisation
         gc.setImageSmoothing(false);
@@ -630,13 +630,11 @@ public class IsometricGame2 extends Application {
     }
 
     private Point2D screenToTile(double screenX, double screenY) {
-        // Obtenir les coordonnées relatives au canvas (pas à l'écran)
-        double canvasX = screenX;
-        double canvasY = screenY;
+        // CORRECTION : Ajuster pour le même offset que tileToScreen
 
         // Convertir en coordonnées monde (avec la caméra)
-        double worldX = canvasX - CANVAS_WIDTH / 2 + cameraX;
-        double worldY = canvasY - CANVAS_HEIGHT / 2 + cameraY;
+        double worldX = screenX - CANVAS_WIDTH / 2 + cameraX;
+        double worldY = screenY - CANVAS_HEIGHT / 2 + cameraY;
 
         // Conversion isométrique vers coordonnées de grille
         double tileX = (worldX / (TILE_WIDTH / 2) + worldY / (TILE_HEIGHT / 2)) / 2;
@@ -752,6 +750,7 @@ public class IsometricGame2 extends Application {
         // Mouvement fluide de caméra (plus lent pour éviter les sauts)
         cameraX += (targetCameraX - cameraX) * 0.05; // Réduit de 0.1 à 0.05
         cameraY += (targetCameraY - cameraY) * 0.05;
+        cameraY +=37.5;
     }
 
     private List<Point2D> findPath(Point2D start, Point2D end) {
@@ -1076,7 +1075,12 @@ public class IsometricGame2 extends Application {
 
         System.out.println("📷 Caméra centrée sur le personnage à la position (" +
                 (int)playerPos.getX() + ", " + (int)playerPos.getY() + ")");
-        System.out.println("   Position caméra: (" + String.format("%.1f", cameraX) + ", " + String.format("%.1f", cameraY) + ")");
+        System.out.println("   Position écran calculée: (" + String.format("%.1f", playerScreenPos.getX()) + ", " + String.format("%.1f", playerScreenPos.getY()) + ")");
+        System.out.println("   Position caméra finale: (" + String.format("%.1f", cameraX) + ", " + String.format("%.1f", cameraY) + ")");
+
+        // DEBUG : Vérifier la cohérence de la conversion
+        Point2D verification = tileToScreen(playerPos.getX(), playerPos.getY());
+        System.out.println("   Vérification conversion: (" + String.format("%.1f", verification.getX()) + ", " + String.format("%.1f", verification.getY()) + ")");
     }
 
     private void smoothCenterCameraOnPlayer() {
