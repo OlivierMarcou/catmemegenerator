@@ -1,4 +1,4 @@
-package com.example.catmeme;
+package com.isometric.game;
 
 import javafx.animation.AnimationTimer;
 import javafx.animation.KeyFrame;
@@ -20,7 +20,7 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.util.*;
 
-public class IsometricGame2 extends Application {
+public class IsometricGame extends Application {
 
     // Constantes
     private static final int TILE_WIDTH = 64;
@@ -750,7 +750,7 @@ public class IsometricGame2 extends Application {
         // Mouvement fluide de caméra (plus lent pour éviter les sauts)
         cameraX += (targetCameraX - cameraX) * 0.05; // Réduit de 0.1 à 0.05
         cameraY += (targetCameraY - cameraY) * 0.05;
-        cameraY +=37.5;
+        cameraY += (MAP_SIZE / 4) *3.15 ;
     }
 
     private List<Point2D> findPath(Point2D start, Point2D end) {
@@ -1075,12 +1075,7 @@ public class IsometricGame2 extends Application {
 
         System.out.println("📷 Caméra centrée sur le personnage à la position (" +
                 (int)playerPos.getX() + ", " + (int)playerPos.getY() + ")");
-        System.out.println("   Position écran calculée: (" + String.format("%.1f", playerScreenPos.getX()) + ", " + String.format("%.1f", playerScreenPos.getY()) + ")");
-        System.out.println("   Position caméra finale: (" + String.format("%.1f", cameraX) + ", " + String.format("%.1f", cameraY) + ")");
-
-        // DEBUG : Vérifier la cohérence de la conversion
-        Point2D verification = tileToScreen(playerPos.getX(), playerPos.getY());
-        System.out.println("   Vérification conversion: (" + String.format("%.1f", verification.getX()) + ", " + String.format("%.1f", verification.getY()) + ")");
+        System.out.println("   Position caméra: (" + String.format("%.1f", cameraX) + ", " + String.format("%.1f", cameraY) + ")");
     }
 
     private void smoothCenterCameraOnPlayer() {

@@ -1,4 +1,4 @@
-package com.example.catmeme;
+package com.isometric.game;
 
 import javafx.application.Application;
 import javafx.scene.Scene;

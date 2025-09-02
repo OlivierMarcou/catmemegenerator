@@ -1,4 +1,5 @@
-package com.example.catmeme;
+package com.isometric.game;
+
 
 
         import java.awt.*;
