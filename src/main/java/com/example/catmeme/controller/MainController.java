@@ -126,7 +126,7 @@ public class MainController implements Initializable {
         // Contour noir
         gc.setStroke(Color.BLACK);
         gc.setLineWidth(3);
-        gc.strokeText(text,  201, imageY -10);
+        gc.strokeText(text,  201, 51);
 
         // Texte blanc par-dessus
         gc.setFill(Color.WHITE);
