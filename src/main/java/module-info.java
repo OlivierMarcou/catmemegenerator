@@ -12,4 +12,6 @@ module catmeme {
     opens com.isometric.game to javafx.fxml;
     exports com.isometric.game.model;
     opens com.isometric.game.model to javafx.fxml;
+    exports com.isometric.game.inventory;
+    opens com.isometric.game.inventory to javafx.fxml;
 }

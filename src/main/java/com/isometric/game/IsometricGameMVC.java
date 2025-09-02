@@ -67,8 +67,8 @@ public class IsometricGameMVC extends Application {
         // Créer la vue
         view = new GameView();
 
-        // Créer le contrôleur avec les références au modèle et à la vue
-        controller = new GameController(model, view);
+        // Créer le contrôleur avec les références au modèle, vue et stage
+        controller = new GameController(model, view, null); // sera mis à jour après
 
         System.out.println("Architecture MVC initialisée");
     }

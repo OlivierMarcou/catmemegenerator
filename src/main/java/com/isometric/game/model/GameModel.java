@@ -1,5 +1,6 @@
 package com.isometric.game.model;
 
+import com.isometric.game.inventory.InventorySystem;
 import javafx.geometry.Point2D;
 import java.io.BufferedReader;
 import java.io.InputStream;
@@ -25,6 +26,7 @@ public class GameModel {
     private Point2D playerPosition = new Point2D(MAP_SIZE / 2, MAP_SIZE / 2);
     private double playerAngle = 0;
     private Set<String> playerKeys = new HashSet<>();
+    private InventorySystem inventory = new InventorySystem(); // Système d'inventaire
 
     // État du mouvement
     private List<Point2D> currentPath = new ArrayList<>();
@@ -138,6 +140,7 @@ public class GameModel {
     public Point2D getPlayerPosition() { return playerPosition; }
     public double getPlayerAngle() { return playerAngle; }
     public Set<String> getPlayerKeys() { return playerKeys; }
+    public InventorySystem getInventory() { return inventory; }
 
     public List<Point2D> getCurrentPath() { return currentPath; }
     public Point2D getTargetPosition() { return targetPosition; }
@@ -535,6 +538,70 @@ public class GameModel {
         setMessageAbovePlayer(props.isOpen ? "Opened" : "Closed");
         notifyDoorStateChanged(x, y, props.isOpen);
         return true;
+    }
+
+    public boolean tryCollectItems(int x, int y) {
+        if (!isValidTile(x, y)) return false;
+
+        // Vérifier si le joueur est assez proche (case actuelle ou adjacente)
+        double distance = Math.abs(x - playerPosition.getX()) + Math.abs(y - playerPosition.getY());
+        if (distance > 1.5) {
+            setMessageAbovePlayer("Too far");
+            return false;
+        }
+
+        List<Item> groundItems = itemMap[x][y];
+        if (groundItems.isEmpty()) {
+            return false;
+        }
+
+        // Convertir les objets au format inventaire
+        List<InventorySystem.InventoryItem> itemsToCollect = new ArrayList<>();
+        for (Item gameItem : groundItems) {
+            itemsToCollect.add(new InventorySystem.InventoryItem(gameItem));
+        }
+
+        // Essayer de tout ramasser
+        boolean collectedAll = true;
+        List<InventorySystem.InventoryItem> remaining = new ArrayList<>();
+
+        for (InventorySystem.InventoryItem invItem : itemsToCollect) {
+            if (!inventory.addItem(invItem)) {
+                remaining.add(invItem);
+                collectedAll = false;
+            }
+        }
+
+        if (collectedAll) {
+            // Tout a été ramassé
+            groundItems.clear();
+            setMessageAbovePlayer("Items collected");
+            System.out.println("Tous les objets ont été ramassés");
+            return true;
+        } else {
+            // Inventaire plein - interface de gestion nécessaire
+            setMessageAbovePlayer("Inventory full");
+            System.out.println("Inventaire plein - " + remaining.size() + " objets non ramassés");
+
+            // Retourner les informations pour afficher l'interface de gestion
+            // (sera géré dans le contrôleur)
+            return false;
+        }
+    }
+
+    public List<Item> getGroundItemsAt(int x, int y) {
+        if (!isValidTile(x, y)) return new ArrayList<>();
+        return new ArrayList<>(itemMap[x][y]);
+    }
+
+    public void dropItemAt(int x, int y, String itemName, int count) {
+        if (!isValidTile(x, y)) return;
+
+        // Créer un objet au sol
+        Item droppedItem = new Item(itemName, count);
+        itemMap[x][y].add(droppedItem);
+
+        System.out.println("Objet jeté au sol: " + itemName + " (" + count + ")");
     }
 
     public void startMovement(List<Point2D> path, Point2D target, Point2D clicked) {

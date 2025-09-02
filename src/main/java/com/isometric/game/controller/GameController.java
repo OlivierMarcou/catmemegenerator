@@ -1,11 +1,14 @@
 package com.isometric.game.controller;
 
+import com.isometric.game.inventory.InventorySystem;
 import com.isometric.game.model.GameModel;
 import com.isometric.game.view.GameView;
 import javafx.animation.KeyFrame;
 import javafx.animation.Timeline;
 import javafx.geometry.Point2D;
+import javafx.scene.input.MouseButton;
 import javafx.scene.input.MouseEvent;
+import javafx.stage.Stage;
 import javafx.util.Duration;
 
 import java.util.*;
@@ -17,15 +20,17 @@ public class GameController implements GameModel.GameModelListener {
 
     private GameModel model;
     private GameView view;
+    private Stage parentStage; // Pour les dialogues
 
     // Timers pour les animations
     private Timeline moveTimeline;
     private Timeline messageTimeline;
     private Timeline exclamationTimeline;
 
-    public GameController(GameModel model, GameView view) {
+    public GameController(GameModel model, GameView view, Stage parentStage) {
         this.model = model;
         this.view = view;
+        this.parentStage = parentStage;
 
         // S'enregistrer comme observateur du modèle
         model.addListener(this);
@@ -72,7 +77,14 @@ public class GameController implements GameModel.GameModelListener {
     private void onMouseClicked(MouseEvent e) {
         Point2D clickedTile = view.screenToTile(e.getX(), e.getY());
         if (clickedTile != null && model.isValidTile((int)clickedTile.getX(), (int)clickedTile.getY())) {
-            handleMovementRequest(clickedTile);
+
+            if (e.getButton() == MouseButton.PRIMARY) {
+                // Clic gauche - déplacement
+                handleMovementRequest(clickedTile);
+            } else if (e.getButton() == MouseButton.SECONDARY) {
+                // Clic droit - ramasser des objets
+                handleItemCollection((int)clickedTile.getX(), (int)clickedTile.getY());
+            }
         }
     }
 
@@ -193,14 +205,62 @@ public class GameController implements GameModel.GameModelListener {
         view.render(model);
     }
 
+    private void handleItemCollection(int x, int y) {
+        List<GameModel.Item> groundItems = model.getGroundItemsAt(x, y);
+        if (groundItems.isEmpty()) {
+            return;
+        }
+
+        boolean success = model.tryCollectItems(x, y);
+        if (!success) {
+            // Inventaire plein - afficher l'interface de gestion
+            showInventoryManagementDialog(x, y);
+        }
+    }
+
+    private void showInventoryManagementDialog(int x, int y) {
+        // Récupérer les objets restants au sol
+        List<InventorySystem.InventoryItem> itemsToCollect = new ArrayList<>();
+        for (GameModel.Item gameItem : model.getGroundItemsAt(x, y)) {
+            itemsToCollect.add(new InventorySystem.InventoryItem(gameItem));
+        }
+
+        // Afficher l'interface de gestion
+        model.getInventory().showInventoryManagementDialog(itemsToCollect, parentStage);
+    }
+
     public void handleKeyPressed(String keyCode) {
         switch (keyCode) {
             case "C":
                 view.centerCameraOnPlayer(model);
                 System.out.println("Caméra recentrée sur le personnage");
                 break;
+            case "I":
+                // Afficher l'inventaire
+                showInventoryDialog();
+                break;
+            case "E":
+                // Afficher l'équipement
+                showEquipmentDialog();
+                break;
+            case "P":
+                // Debug - afficher les stats de l'inventaire
+                model.getInventory().printInventoryStats();
+                break;
             // Ajouter d'autres commandes clavier si nécessaire
         }
+    }
+
+    private void showInventoryDialog() {
+        InventorySystem inventory = model.getInventory();
+        System.out.println("Ouverture de l'inventaire:");
+        inventory.printInventoryStats();
+        // Ici on pourrait créer une interface graphique plus complexe pour l'inventaire
+    }
+
+    private void showEquipmentDialog() {
+        InventorySystem inventory = model.getInventory();
+        inventory.showEquipmentDialog(parentStage);
     }
 
     // Implémentation des callbacks du modèle
